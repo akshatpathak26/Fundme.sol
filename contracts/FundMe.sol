@@ -1,45 +1,78 @@
-//Get funds from users 
-//Withdraw funds
-// Set a minumum funding value in USD
-
-
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.8;
 
+import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 import "./PriceConverter.sol";
 
+error NotOwner();
+
 contract FundMe {
-    using PriceConverter for uint256; 
-    
-    uint256 public minimumUsd = 50 * 1e18; //1 * 10**18
+    using PriceConverter for uint256;
 
-    address[] public funders;
     mapping(address => uint256) public addressToAmountFunded;
+    address[] public funders;
 
-    function fund() public payable {
-
-      
-
-     //payable is the function which allows us to make our contract payable   
-     //Want to be able to set a minimum fund amount in USD
-     //1. how do we send ETH to this contract
-     //msg.value represents how much wei the sender sent
-
-     require(msg.value.getConversionRate() > minimumUsd, "Didnt send enough amt"); //1e18 == 1 * 10 ** 18 
-
-     //require is a checker just like ternory operator in js
-
-    //if the condition didnt get fulfilled then revert will be trigerred that is undo any action 
-    //before and send the remaining gas back
-
-    funders.push(msg.sender); //msg.sender global keyword for getting the address of funder
-    addressToAmountFunded[msg.sender] = msg.value;
-    //                   address      =>  uint256 value
-
+    // Could we make this constant?  /* hint: no! We should make it immutable! */
+    address public /* immutable */ i_owner;
+    uint256 public constant MINIMUM_USD = 50 * 10 ** 18;
+    
+    constructor() {
+        i_owner = msg.sender;
     }
 
+    function fund() public payable {
+        require(msg.value.getConversionRate() >= MINIMUM_USD, "You need to spend more ETH!");
+        // require(PriceConverter.getConversionRate(msg.value) >= MINIMUM_USD, "You need to spend more ETH!");
+        addressToAmountFunded[msg.sender] += msg.value;
+        funders.push(msg.sender);
+    }
     
+    function getVersion() public view returns (uint256){
+        // ETH/USD price feed address of Goerli Network.
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(0xD4a33860578De61DBAbDc8BFdb98FD742fA7028e);
+        return priceFeed.version();
+    }
+    
+    modifier onlyOwner {
+        // require(msg.sender == owner);
+        if (msg.sender != i_owner)revert NotOwner();
+        _;
+    }
+    
+    function withdraw() public onlyOwner {
+        for (uint256 funderIndex=0; funderIndex < funders.length; funderIndex++){
+            address funder = funders[funderIndex];
+            addressToAmountFunded[funder] = 0;
+        }
+        funders = new address[](0);
+        // // transfer
+        // payable(msg.sender).transfer(address(this).balance);
+        // // send
+        // bool sendSuccess = payable(msg.sender).send(address(this).balance);
+        // require(sendSuccess, "Send failed");
+        // call
+        (bool callSuccess, ) = payable(msg.sender).call{value: address(this).balance}("");
+        require(callSuccess, "Call failed");
+    }
+    // Explainer from: https://solidity-by-example.org/fallback/
+    // Ether is sent to contract
+    //      is msg.data empty?
+    //          /   \ 
+    //         yes  no
+    //         /     \
+    //    receive()?  fallback() 
+    //     /   \ 
+    //   yes   no
+    //  /        \
+    //receive()  fallback()
 
-    //function Withdraw() {}
+    receive() external payable{
+        fund();
+    }
+
+    fallback() external payable{
+        fund();
+    }
+   
 
 }
